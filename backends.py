@@ -15,6 +15,16 @@ class BaseBackend(ABC):
         self.config: Dict[str, Any] = dict(config or {})
         self.env = env
 
+    def connect(self) -> None:
+        """Establish a connection to the backend.
+
+        Subclasses may override this method to perform setup such as
+        authentication or network handshakes. The default implementation is a
+        no-op to keep simple backends lightweight.
+        """
+
+        return None
+
 
 class SCMBackend(BaseBackend):
     """Interface for source control management backends."""

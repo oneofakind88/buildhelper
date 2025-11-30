@@ -1,8 +1,11 @@
+import functools
 import pathlib
-from typing import Any, Dict
+from typing import Any, Callable, Dict
 
 import click
 import yaml
+
+from backends import get_backend
 
 
 DEFAULT_ENV = "local"
@@ -28,6 +31,46 @@ def load_config(config_path: str) -> Dict[str, Any]:
 
 def derive_runner(env: str) -> str:
     return f"runner_{env}"
+
+
+def ensure_session(domain: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Ensure a connected backend session exists for ``domain``.
+
+    The decorator checks ``ctx.obj["sessions"][domain]``. When missing, it
+    resolves the backend name from ``ctx.obj["config"]["backends"][domain]``,
+    instantiates it via :func:`backends.get_backend`, calls ``connect()``, and
+    stores the connected backend on the context for reuse.
+    """
+
+    def decorator(command: Callable[..., Any]) -> Callable[..., Any]:
+        @click.pass_context
+        @functools.wraps(command)
+        def wrapper(ctx: click.Context, *args: Any, **kwargs: Any) -> Any:
+            ctx.ensure_object(dict)
+            sessions = ctx.obj.setdefault("sessions", {})
+
+            if domain not in sessions:
+                try:
+                    backend_name = ctx.obj.get("config", {})["backends"][domain]
+                except KeyError as exc:
+                    raise click.ClickException(
+                        f"No backend configured for domain '{domain}'"
+                    ) from exc
+
+                backend = get_backend(
+                    domain,
+                    backend_name,
+                    config=ctx.obj.get("config", {}),
+                    env=ctx.obj.get("env"),
+                )
+                backend.connect()
+                sessions[domain] = backend
+
+            return command(ctx, *args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 
 @click.group(invoke_without_command=True)
@@ -76,6 +119,53 @@ def review(ctx: click.Context) -> None:
 @click.pass_context
 def workflow(ctx: click.Context) -> None:
     ctx.ensure_object(dict)
+
+
+@scm.command()
+@ensure_session("scm")
+def sync(ctx: click.Context) -> None:
+    backend = ctx.obj["sessions"]["scm"]
+    result = backend.sync()
+    if result is not None:
+        click.echo(result)
+
+
+@scm.command()
+@ensure_session("scm")
+def status(ctx: click.Context) -> None:
+    backend = ctx.obj["sessions"]["scm"]
+    result = backend.status()
+    if result is not None:
+        click.echo(result)
+
+
+@analysis.command()
+@ensure_session("analysis")
+def scan(ctx: click.Context) -> None:
+    backend = ctx.obj["sessions"]["analysis"]
+    result = backend.scan()
+    if result is not None:
+        click.echo(result)
+
+
+@review.command()
+@ensure_session("review")
+@click.option("--subject", default="", show_default=True)
+def create(ctx: click.Context, subject: str) -> None:
+    backend = ctx.obj["sessions"]["review"]
+    result = backend.create_review(subject=subject)
+    if result is not None:
+        click.echo(result)
+
+
+@review.command()
+@ensure_session("review")
+@click.option("--body", default="", show_default=True)
+def comment(ctx: click.Context, body: str) -> None:
+    backend = ctx.obj["sessions"]["review"]
+    result = backend.comment(body=body)
+    if result is not None:
+        click.echo(result)
 
 
 if __name__ == "__main__":
