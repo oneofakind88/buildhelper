@@ -37,6 +37,10 @@ class SCMBackend(BaseBackend):
     def status(self) -> Any:  # pragma: no cover - interface only
         """Return status information for the working tree."""
 
+    @abstractmethod
+    def submit(self, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover - interface only
+        """Submit changes to the remote repository or review system."""
+
 
 class AnalysisBackend(BaseBackend):
     """Interface for analysis backends."""
@@ -44,6 +48,10 @@ class AnalysisBackend(BaseBackend):
     @abstractmethod
     def scan(self) -> Any:  # pragma: no cover - interface only
         """Run an analysis scan."""
+
+    @abstractmethod
+    def report(self, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover - interface only
+        """Generate and return an analysis report."""
 
 
 class ReviewBackend(BaseBackend):
@@ -56,6 +64,10 @@ class ReviewBackend(BaseBackend):
     @abstractmethod
     def comment(self, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover - interface only
         """Create a comment on a review or change."""
+
+    @abstractmethod
+    def approve(self, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover - interface only
+        """Approve a review or change."""
 
 
 BackendType = Type[BaseBackend]

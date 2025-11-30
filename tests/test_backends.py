@@ -25,10 +25,16 @@ class DummySCM(SCMBackend):
     def status(self):
         return {"state": "clean", "config": self.config}
 
+    def submit(self, message: str = ""):
+        return {"submitted": message}
+
 
 class DummyAnalysis(AnalysisBackend):
     def scan(self):
         return {"results": [], "env": self.env}
+
+    def report(self, format: str = "text"):
+        return {"report": format}
 
 
 class DummyReview(ReviewBackend):
@@ -37,6 +43,9 @@ class DummyReview(ReviewBackend):
 
     def comment(self, *args, **kwargs):
         return {"commented": True, "args": args, "kwargs": kwargs}
+
+    def approve(self, *args, **kwargs):
+        return {"approved": True, "args": args, "kwargs": kwargs}
 
 
 def test_registers_and_returns_backend_with_env_overrides():
@@ -75,3 +84,4 @@ def test_backend_methods_are_callable():
 
     assert backend.create_review(subject="demo") == {"review": True, "args": (), "kwargs": {"subject": "demo"}}
     assert backend.comment(body="note") == {"commented": True, "args": (), "kwargs": {"body": "note"}}
+    assert backend.approve(message="ship") == {"approved": True, "args": (), "kwargs": {"message": "ship"}}
