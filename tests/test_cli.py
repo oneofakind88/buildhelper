@@ -70,6 +70,27 @@ def test_cli_group_invocation(tmp_path):
     assert result.exit_code == 0
 
 
+def test_cli_selects_runner_for_environment(monkeypatch, tmp_path):
+    config_data = {"envs": {"staging": {"runner": {"type": "local", "custom": True}}}}
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(config_data), encoding="utf-8")
+
+    created_runners = []
+
+    def fake_get_runner(env, config):
+        runner = object()
+        created_runners.append((env, config, runner))
+        return runner
+
+    monkeypatch.setattr("cli.get_runner", fake_get_runner)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["--env", "staging", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    assert created_runners == [("staging", config_data, created_runners[0][2])]
+
+
 def test_ensure_session_connects_and_stores_backend(tmp_path):
     class DummySCM(SCMBackend):
         def __init__(self, *args, **kwargs):
@@ -139,6 +160,42 @@ def test_ensure_session_rejects_non_mapping_backends(tmp_path):
 
     assert result.exit_code != 0
     assert "must be a mapping" in result.output
+
+
+def test_ensure_session_calls_backend_connect_and_command(monkeypatch, tmp_path):
+    class StubBackend:
+        def __init__(self):
+            self.connect_calls = 0
+            self.status_calls = 0
+
+        def connect(self):
+            self.connect_calls += 1
+
+        def status(self):
+            self.status_calls += 1
+            return "stub-status"
+
+    backend_instances = []
+
+    def fake_get_backend(domain, name, config=None, env=None):
+        backend = StubBackend()
+        backend_instances.append((domain, name, config, env, backend))
+        return backend
+
+    monkeypatch.setattr("cli.get_backend", fake_get_backend)
+
+    config = {"backends": {"scm": "stub"}, "backend_configs": {"stub": {}}}
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["--env", "dev", "--config", str(config_path), "scm", "status"])
+
+    assert result.exit_code == 0
+    assert "stub-status" in result.output
+    assert backend_instances[0][0:4] == ("scm", "stub", config, "dev")
+    assert backend_instances[0][4].connect_calls == 1
+    assert backend_instances[0][4].status_calls == 1
 
 
 def test_ensure_session_wraps_connection_errors(tmp_path):
@@ -309,3 +366,39 @@ def test_workflow_run_continues_when_requested(tmp_path, restore_commands):
     assert result.exit_code != 0
     assert "after" in result.output
     assert "completed with 1 failed step(s)" in result.output
+
+
+def test_workflow_steps_share_runner(monkeypatch, tmp_path, restore_commands):
+    class StubRunner:
+        def __init__(self):
+            self.calls = []
+
+        def run_command(self, cmd):
+            self.calls.append(cmd)
+            return "ok"
+
+    stub_runner = StubRunner()
+
+    def fake_get_runner(env, config):
+        return stub_runner
+
+    monkeypatch.setattr("cli.get_runner", fake_get_runner)
+
+    @click.command("run-shell")
+    @click.pass_context
+    def run_shell(ctx):
+        click.echo(ctx.obj["runner"].run_command(["echo", "hello"]))
+
+    cli.add_command(run_shell)
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump({"workflows": {"demo": [["run-shell"], ["run-shell"]]}}),
+        encoding="utf-8",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["--config", str(config_path), "workflow", "run", "demo"])
+
+    assert result.exit_code == 0
+    assert stub_runner.calls == [["echo", "hello"], ["echo", "hello"]]
