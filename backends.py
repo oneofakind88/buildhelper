@@ -112,11 +112,15 @@ def get_backend(domain: str, name: str, config: Mapping[str, Any] | None = None,
     with ``envs[env]["backend_configs"][name]`` when an environment is provided.
     """
 
+    if domain not in BACKEND_REGISTRY:
+        raise click.ClickException(f"Unknown backend domain '{domain}'")
+
     try:
         backend_cls = BACKEND_REGISTRY[domain][name]
     except KeyError as exc:  # pragma: no cover - defensive error path
+        known = ", ".join(sorted(BACKEND_REGISTRY.get(domain, {}))) or "none"
         raise click.ClickException(
-            f"Backend '{name}' is not registered for domain '{domain}'"
+            f"Backend '{name}' is not registered for domain '{domain}'. Known backends: {known}"
         ) from exc
 
     backend_config = _lookup_config(config, name, env=env)
