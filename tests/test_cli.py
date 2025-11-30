@@ -58,6 +58,7 @@ def test_cli_initializes_context(tmp_path):
         assert isinstance(ctx.obj["runner"], LocalRunner)
         assert ctx.obj["workflow_state"] == {}
         assert ctx.obj["verbose"] is True
+        assert ctx.obj["quiet"] is False
 
 
 def test_cli_group_invocation(tmp_path):
@@ -68,6 +69,32 @@ def test_cli_group_invocation(tmp_path):
     result = runner.invoke(cli, ["--config", str(config_path)])
 
     assert result.exit_code == 0
+
+
+def test_cli_respects_quiet_flag(tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump({}), encoding="utf-8")
+
+    with cli.make_context(
+        "cli",
+        ["--env", "dev", "--config", str(config_path), "--quiet"],
+    ) as ctx:
+        cli.invoke(ctx)
+        assert ctx.obj["verbose"] is False
+        assert ctx.obj["quiet"] is True
+
+
+def test_cli_rejects_verbose_and_quiet_together(tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump({}), encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["--config", str(config_path), "--verbose", "--quiet", "scm", "status"]
+    )
+
+    assert result.exit_code != 0
+    assert "mutually exclusive" in result.output
 
 
 def test_cli_selects_runner_for_environment(monkeypatch, tmp_path):

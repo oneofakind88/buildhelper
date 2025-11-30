@@ -108,15 +108,19 @@ def ensure_session(domain: str) -> Callable[[Callable[..., Any]], Callable[..., 
     type=click.Path(exists=False, dir_okay=False, resolve_path=True, path_type=str),
     help="Path to configuration file",
 )
-@click.option("--verbose/--quiet", default=False, help="Enable verbose logging output")
+@click.option("--verbose", is_flag=True, help="Enable verbose logging output")
+@click.option("--quiet", is_flag=True, help="Reduce logging output to errors only")
 @click.pass_context
-def cli(ctx: click.Context, env: str, config: str, verbose: bool) -> None:
+def cli(ctx: click.Context, env: str, config: str, verbose: bool, quiet: bool) -> None:
     ctx.ensure_object(dict)
     if ctx.obj:
         return
 
+    if verbose and quiet:
+        raise click.ClickException("--verbose and --quiet are mutually exclusive")
+
     configuration = load_config(config)
-    configure_logging(verbose=verbose, quiet=not verbose)
+    configure_logging(verbose=verbose, quiet=quiet)
     logger.debug("Loaded configuration from %s", config)
     runner = get_runner(env, configuration)
     ctx.obj = {
@@ -126,6 +130,7 @@ def cli(ctx: click.Context, env: str, config: str, verbose: bool) -> None:
         "runner": runner,
         "workflow_state": {},
         "verbose": verbose,
+        "quiet": quiet,
     }
 
 

@@ -33,7 +33,7 @@ Commands are defined in `cli.py` as Click subcommands. Each command emits a huma
 - Workflow execution announces its start, counts steps, and stops on first failure unless `--continue-on-error` is provided. Failures are aggregated for a final status message.
 
 ### Logging
-- `logging_utils.py` centralizes logging configuration. The `--verbose/--quiet` flags map to DEBUG/ERROR levels respectively, ensuring consistent log output across commands.
+- `logging_utils.py` centralizes logging configuration. The `--verbose` and `--quiet` flags map to DEBUG/ERROR levels respectively and are mutually exclusive to avoid conflicting settings, ensuring consistent log output across commands.
 
 ## Configuration format
 
@@ -85,6 +85,7 @@ Initialize the CLI with a configuration file and optional environment:
 
 ```bash
 python -m cli --config config.yaml --env docker --verbose scm sync
+python -m cli --config config.yaml --env docker --quiet scm status
 ```
 
 Common commands:
