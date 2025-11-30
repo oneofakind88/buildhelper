@@ -4,7 +4,8 @@ import pytest
 import yaml
 
 from backends import AnalysisBackend, ReviewBackend, SCMBackend, register_backend
-from cli import cli, derive_runner, load_config
+from cli import cli, load_config
+from runners import LocalRunner
 
 
 @pytest.fixture(autouse=True)
@@ -41,10 +42,6 @@ def test_load_config_rejects_non_mapping(tmp_path):
         load_config(str(config_path))
 
 
-def test_derive_runner_uses_environment_name():
-    assert derive_runner("prod") == "runner_prod"
-
-
 def test_cli_initializes_context(tmp_path):
     config_data = {"feature": True}
     config_path = tmp_path / "config.yaml"
@@ -55,14 +52,12 @@ def test_cli_initializes_context(tmp_path):
         ["--env", "staging", "--config", str(config_path), "--verbose"],
     ) as ctx:
         cli.invoke(ctx)
-        assert ctx.obj == {
-            "config": config_data,
-            "env": "staging",
-            "sessions": {},
-            "runner": "runner_staging",
-            "workflow_state": {},
-            "verbose": True,
-        }
+        assert ctx.obj["config"] == config_data
+        assert ctx.obj["env"] == "staging"
+        assert ctx.obj["sessions"] == {}
+        assert isinstance(ctx.obj["runner"], LocalRunner)
+        assert ctx.obj["workflow_state"] == {}
+        assert ctx.obj["verbose"] is True
 
 
 def test_cli_group_invocation(tmp_path):
