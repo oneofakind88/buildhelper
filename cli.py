@@ -139,11 +139,37 @@ def status(ctx: click.Context) -> None:
         click.echo(result)
 
 
+@scm.command()
+@ensure_session("scm")
+@click.option("--message", "message", default="", show_default=True, help="Submission message")
+def submit(ctx: click.Context, message: str) -> None:
+    backend = ctx.obj["sessions"]["scm"]
+    result = backend.submit(message=message)
+    if result is not None:
+        click.echo(result)
+
+
 @analysis.command()
 @ensure_session("analysis")
 def scan(ctx: click.Context) -> None:
     backend = ctx.obj["sessions"]["analysis"]
     result = backend.scan()
+    if result is not None:
+        click.echo(result)
+
+
+@analysis.command()
+@ensure_session("analysis")
+@click.option(
+    "--format",
+    "format_",
+    default="text",
+    show_default=True,
+    help="Output format for the analysis report",
+)
+def report(ctx: click.Context, format_: str) -> None:
+    backend = ctx.obj["sessions"]["analysis"]
+    result = backend.report(format=format_)
     if result is not None:
         click.echo(result)
 
@@ -164,6 +190,16 @@ def create(ctx: click.Context, subject: str) -> None:
 def comment(ctx: click.Context, body: str) -> None:
     backend = ctx.obj["sessions"]["review"]
     result = backend.comment(body=body)
+    if result is not None:
+        click.echo(result)
+
+
+@review.command()
+@ensure_session("review")
+@click.option("--message", default="", show_default=True)
+def approve(ctx: click.Context, message: str) -> None:
+    backend = ctx.obj["sessions"]["review"]
+    result = backend.approve(message=message)
     if result is not None:
         click.echo(result)
 
