@@ -42,6 +42,17 @@ def test_load_config_rejects_non_mapping(tmp_path):
         load_config(str(config_path))
 
 
+def test_load_config_rejects_invalid_sections(tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump({"backends": [], "envs": [], "backend_configs": []}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(click.ClickException):
+        load_config(str(config_path))
+
+
 def test_cli_initializes_context(tmp_path):
     config_data = {"feature": True}
     config_path = tmp_path / "config.yaml"
@@ -167,6 +178,54 @@ def test_ensure_session_raises_when_backend_missing(tmp_path):
     assert "No backend configured for domain" in result.output
 
 
+def test_session_cache_restores_and_persists(tmp_path):
+    cache_path = tmp_path / "cache.yaml"
+
+    class DummySCM(SCMBackend):
+        last_instance = None
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.restored_payload = None
+            DummySCM.last_instance = self
+
+        def restore_session(self, payload):
+            self.restored_payload = payload
+
+        def export_session(self):
+            return {"token": "new-token"}
+
+        def connect(self):
+            return None
+
+        def sync(self):  # pragma: no cover - not used
+            return "synced"
+
+        def status(self):
+            return {"restored": self.restored_payload}
+
+        def submit(self, message: str = ""):
+            return {"submitted": message}
+
+    cache_path.write_text(yaml.safe_dump({"scm": {"token": "cached"}}))
+
+    register_backend("scm", "cached", DummySCM)
+    config = {
+        "backends": {"scm": "cached"},
+        "cache": {"sessions_path": str(cache_path)},
+    }
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["--config", str(config_path), "scm", "status"])
+
+    assert result.exit_code == 0
+    assert DummySCM.last_instance.restored_payload == {"token": "cached"}
+    persisted = yaml.safe_load(cache_path.read_text())
+    assert persisted["scm"] == {"token": "new-token"}
+
+
 def test_ensure_session_reports_missing_backends_section(tmp_path):
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump({}), encoding="utf-8")
@@ -223,6 +282,31 @@ def test_ensure_session_calls_backend_connect_and_command(monkeypatch, tmp_path)
     assert backend_instances[0][0:4] == ("scm", "stub", config, "dev")
     assert backend_instances[0][4].connect_calls == 1
     assert backend_instances[0][4].status_calls == 1
+
+
+def test_telemetry_records_command_duration(tmp_path):
+    class DummySCM(SCMBackend):
+        def connect(self):
+            return None
+
+        def sync(self):
+            return "synced"
+
+        def status(self):  # pragma: no cover - not used
+            return "status"
+
+        def submit(self, message: str = ""):
+            return {"message": message}
+
+    register_backend("scm", "dummy", DummySCM)
+    config = {"backends": {"scm": "dummy"}}
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    with cli.make_context("cli", ["--config", str(config_path), "scm", "sync"]) as ctx:
+        cli.invoke(ctx)
+        events = ctx.obj.telemetry.events
+        assert any(event.name == "scm.sync" for event in events)
 
 
 def test_ensure_session_wraps_connection_errors(tmp_path):

@@ -21,6 +21,7 @@ Commands are defined in `cli.py` as Click subcommands. Each command emits a huma
 - Abstract interfaces live in `backends.py` (`SCMBackend`, `AnalysisBackend`, `ReviewBackend`).
 - Concrete backends register themselves with `register_backend(domain, name, backend_cls)`.
 - `get_backend(domain, name, config, env)` retrieves the registered class, merges base and environment-specific settings (`backend_configs` plus `envs.<env>.backend_configs`), and instantiates the backend.
+- Plugin discovery loads external registrations via the `buildhelper.plugins` entry-point group, enabling third-party packages to add backends or commands without modifying core code.
 
 ### Runner abstraction
 - `runners.py` defines a `Runner` interface for executing shell commands in different environments.
@@ -31,6 +32,18 @@ Commands are defined in `cli.py` as Click subcommands. Each command emits a huma
 ### Workflows
 - Configuration can define workflows as ordered step lists. Each step is a command string or argument array, executed via `cli.invoke` while sharing the same context (and therefore the same sessions/runner/state).
 - Workflow execution announces its start, counts steps, and stops on first failure unless `--continue-on-error` is provided. Failures are aggregated for a final status message.
+- Telemetry captures per-step timing so you can inspect slow or failing workflow stages.
+
+### Logging
+- `logging_utils.py` centralizes logging configuration. The `--verbose` and `--quiet` flags map to DEBUG/ERROR levels respectively and are mutually exclusive to avoid conflicting settings, ensuring consistent log output across commands.
+
+### Context typing and session caching
+- `context_state.py` wraps Click's `ctx.obj` in a typed `ContextState` so shared fields (config, env, runner, telemetry, cache) remain discoverable and uniform.
+- `session_cache.py` persists backend session metadata (e.g., tokens) to `~/.buildhelper/sessions.yaml` or a configured path, allowing backends to restore state across CLI runs via optional `restore_session`/`export_session` hooks.
+
+### Telemetry
+- `telemetry.py` records command durations and statuses through a decorator (`@telemetry_event`) and a context manager (`TelemetryCollector.track`).
+- Workflow steps automatically emit telemetry, and individual commands record success or failure timing.
 
 ### Logging
 - `logging_utils.py` centralizes logging configuration. The `--verbose/--quiet` flags map to DEBUG/ERROR levels respectively, ensuring consistent log output across commands.
@@ -78,6 +91,7 @@ workflows:
 - `backend_configs` stores backend-specific settings. Environment-specific overrides live under `envs.<env>.backend_configs.<name>`.
 - `envs.<env>.runner` selects and configures the execution runner.
 - `workflows` lists reusable sequences of commands.
+- Configuration is validated for expected mapping shapes during startup to catch typos early.
 
 ## Usage
 
@@ -85,6 +99,7 @@ Initialize the CLI with a configuration file and optional environment:
 
 ```bash
 python -m cli --config config.yaml --env docker --verbose scm sync
+python -m cli --config config.yaml --env docker --quiet scm status
 ```
 
 Common commands:
@@ -101,6 +116,64 @@ Because commands print their invocation banners, you will always see output veri
 - Run tests: `pytest`
 - Add new backends by subclassing the relevant interface in `backends.py` and registering the class with `register_backend`.
 - When implementing commands, rely on the shared context for sessions, runners, and workflow state to keep behavior consistent across domains and workflows.
+
+## Adding a new command group
+
+Follow the pattern below to introduce a new domain (for example, **`deploy`**) and wire it to backends:
+
+1. **Create a backend interface** in `backends.py` if the domain needs specific methods (e.g., `DeployBackend` with `plan`/`apply`).
+2. **Implement concrete backends** in a module of your choice and register them:
+
+   ```python
+   from backends import register_backend, BaseBackend
+
+
+   class DummyDeployBackend(BaseBackend):
+       def connect(self):
+           ...
+
+       def plan(self):
+           return "planned"
+
+       def apply(self):
+           return "applied"
+
+
+   register_backend("deploy", "dummy", DummyDeployBackend)
+   ```
+
+3. **Declare a Click group** in `cli.py` and route commands through `ensure_session("deploy")` to reuse the standard session lifecycle:
+
+   ```python
+   @cli.group()
+   @click.pass_context
+   def deploy(ctx):
+       ctx.ensure_object(dict)
+
+
+   @deploy.command()
+   @ensure_session("deploy")
+   def plan(ctx):
+       click.echo("[deploy] Planning")
+       result = ctx.obj["sessions"]["deploy"].plan()
+       if result is not None:
+           click.echo(result)
+   ```
+
+4. **Expose the backend in configuration** by adding `deploy: dummy` under `backends:` and optional settings under `backend_configs.dummy` and `envs.<env>.backend_configs.dummy`.
+5. **Extend workflows** with `deploy` steps so they participate in orchestrated runs.
+
+This pattern keeps new domains consistent with existing ones and requires minimal boilerplate beyond defining the interface and commands specific to the domain.
+
+## Optimization opportunities
+
+Below are additional improvements that can make Buildhelper more robust and extensible:
+
+1. **Plugin discovery**: load additional command groups and backends via Python entry points so external packages can extend the CLI without modifying `cli.py`.
+2. **Schema-validated configuration**: enforce a JSON Schema or Pydantic model for `config.yaml` to provide early feedback on typos, missing sections, or invalid values.
+3. **Connection pooling and caching**: cache authentication tokens or session handles across runs (optionally via a shared cache directory) to reduce repeated logins.
+4. **Typed context objects**: wrap `ctx.obj` in lightweight dataclasses to improve type safety and editor auto-completion when commands consume shared state.
+5. **Telemetry hooks**: instrument command durations and failures (with opt-in/opt-out) to highlight slow or error-prone workflows and guide future optimizations.
 
 ## Extensibility tips
 
