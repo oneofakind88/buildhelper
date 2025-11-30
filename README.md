@@ -1,0 +1,111 @@
+# Buildhelper CLI
+
+Buildhelper is a Click-powered command line façade that unifies multiple developer workflows (SCM, analysis, and code review) behind a single, backend-agnostic interface. Projects pick their desired tooling through configuration and buildhelper wires commands to the appropriate backend implementation while keeping session state in Click's context store.
+
+## Architecture overview
+
+### Command groups
+- **`scm`**: Source control lifecycle (sync, status, submit).
+- **`analysis`**: Static analysis and reporting (scan, report).
+- **`review`**: Code review actions (create, comment, approve).
+- **`workflow`**: Orchestrated, reusable command sequences defined in configuration.
+
+Commands are defined in `cli.py` as Click subcommands. Each command emits a human-readable banner (e.g., `[scm] Executing sync`) to verify invocation even when backends are silent.
+
+### Context store and session management
+- The top-level `cli` command initializes a shared context dictionary containing configuration, environment, session cache, selected runner, workflow state, and verbosity settings.
+- The `ensure_session` decorator guarantees that a backend instance is connected before any domain command runs. It resolves the backend name from configuration (`backends.<domain>`), instantiates it via `backends.get_backend`, and calls `connect()` once per context lifetime.
+- Connected backends live in `ctx.obj["sessions"]`, so repeated invocations reuse the same session.
+
+### Backend registry
+- Abstract interfaces live in `backends.py` (`SCMBackend`, `AnalysisBackend`, `ReviewBackend`).
+- Concrete backends register themselves with `register_backend(domain, name, backend_cls)`.
+- `get_backend(domain, name, config, env)` retrieves the registered class, merges base and environment-specific settings (`backend_configs` plus `envs.<env>.backend_configs`), and instantiates the backend.
+
+### Runner abstraction
+- `runners.py` defines a `Runner` interface for executing shell commands in different environments.
+- Implementations: `LocalRunner`, `DockerRunner`, and `K8sRunner`.
+- `get_runner(env, config)` selects the proper runner using `envs.<env>.runner` overrides, defaulting to local execution.
+- The runner instance is stored in the context for any backend or workflow step needing shell access.
+
+### Workflows
+- Configuration can define workflows as ordered step lists. Each step is a command string or argument array, executed via `cli.invoke` while sharing the same context (and therefore the same sessions/runner/state).
+- Workflow execution announces its start, counts steps, and stops on first failure unless `--continue-on-error` is provided. Failures are aggregated for a final status message.
+
+### Logging
+- `logging_utils.py` centralizes logging configuration. The `--verbose/--quiet` flags map to DEBUG/ERROR levels respectively, ensuring consistent log output across commands.
+
+## Configuration format
+
+Example `config.yaml`:
+
+```yaml
+env: local
+backends:
+  scm: git
+  analysis: sonar
+  review: bitbucket
+backend_configs:
+  git:
+    url: https://git.example.com
+    token: ${GIT_TOKEN}
+  sonar:
+    host: https://sonarqube.example.com
+    token: ${SONAR_TOKEN}
+  bitbucket:
+    host: https://bitbucket.example.com
+    user: ci
+    app_password: ${BB_APP_PASSWORD}
+envs:
+  docker:
+    runner:
+      type: docker
+      container: ci-tools
+  k8s:
+    runner:
+      type: k8s
+      namespace: tooling
+      pod: ci-runner
+workflows:
+  full-check:
+    - "scm sync"
+    - ["analysis", "scan"]
+    - ["analysis", "report", "--format", "json"]
+    - ["review", "create", "--subject", "Automated review"]
+```
+
+- `backends` maps each domain to a backend name.
+- `backend_configs` stores backend-specific settings. Environment-specific overrides live under `envs.<env>.backend_configs.<name>`.
+- `envs.<env>.runner` selects and configures the execution runner.
+- `workflows` lists reusable sequences of commands.
+
+## Usage
+
+Initialize the CLI with a configuration file and optional environment:
+
+```bash
+python -m cli --config config.yaml --env docker --verbose scm sync
+```
+
+Common commands:
+- `scm sync` / `scm status` / `scm submit --message "Ready"`
+- `analysis scan` / `analysis report --format json`
+- `review create --subject "Feature"` / `review comment --body "Looks good"` / `review approve --message "Ship it"`
+- `workflow run <name> [--continue-on-error]`
+
+Because commands print their invocation banners, you will always see output verifying that the right handler ran even if the backend returns nothing.
+
+## Development and testing
+
+- Install dependencies: `pip install -r requirements-dev.txt`
+- Run tests: `pytest`
+- Add new backends by subclassing the relevant interface in `backends.py` and registering the class with `register_backend`.
+- When implementing commands, rely on the shared context for sessions, runners, and workflow state to keep behavior consistent across domains and workflows.
+
+## Extensibility tips
+
+- **New domains**: Add an interface, extend `BACKEND_REGISTRY`, and create a new Click group mirroring the existing ones.
+- **Backends**: Keep `connect()` lightweight; it is invoked lazily via `ensure_session` the first time any command for that domain runs.
+- **Workflows**: Use simple strings for most steps; supply explicit argument arrays when you need to pass flags without shell parsing ambiguity.
+- **Runners**: Implement additional environment runners by subclassing `Runner` and updating `get_runner` to route to them.
+

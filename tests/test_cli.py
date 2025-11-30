@@ -286,6 +286,95 @@ def test_command_outputs_include_backend_results(tmp_path):
     assert "approved:ship" in approve_result.output
 
 
+def test_commands_print_invocation_messages_even_without_backend_output(tmp_path):
+    class SilentSCM(SCMBackend):
+        def sync(self):
+            return None
+
+        def status(self):
+            return None
+
+        def submit(self, message: str = ""):
+            return None
+
+    register_backend("scm", "silent", SilentSCM)
+
+    config = {"backends": {"scm": "silent"}, "backend_configs": {"silent": {}}}
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    runner = CliRunner()
+
+    sync_result = runner.invoke(cli, ["--config", str(config_path), "scm", "sync"])
+    assert sync_result.exit_code == 0
+    assert "[scm] Executing sync" in sync_result.output
+
+    status_result = runner.invoke(cli, ["--config", str(config_path), "scm", "status"])
+    assert status_result.exit_code == 0
+    assert "[scm] Checking status" in status_result.output
+
+    submit_result = runner.invoke(
+        cli, ["--config", str(config_path), "scm", "submit", "--message", "msg"]
+    )
+    assert submit_result.exit_code == 0
+    assert "[scm] Submitting with message: msg" in submit_result.output
+
+
+def test_analysis_and_review_commands_emit_invocation_messages(tmp_path):
+    class SilentAnalysis(AnalysisBackend):
+        def scan(self):
+            return None
+
+        def report(self, format: str = "text"):
+            return None
+
+    class SilentReview(ReviewBackend):
+        def create_review(self, *args, **kwargs):
+            return None
+
+        def comment(self, *args, **kwargs):
+            return None
+
+        def approve(self, *args, **kwargs):
+            return None
+
+    register_backend("analysis", "silent-analysis", SilentAnalysis)
+    register_backend("review", "silent-review", SilentReview)
+
+    config = {
+        "backends": {"analysis": "silent-analysis", "review": "silent-review"},
+        "backend_configs": {"silent-analysis": {}, "silent-review": {}},
+    }
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    runner = CliRunner()
+
+    scan_result = runner.invoke(cli, ["--config", str(config_path), "analysis", "scan"])
+    assert scan_result.exit_code == 0
+    assert "[analysis] Running scan" in scan_result.output
+
+    report_result = runner.invoke(
+        cli, ["--config", str(config_path), "analysis", "report", "--format", "json"]
+    )
+    assert report_result.exit_code == 0
+    assert "[analysis] Generating report in json format" in report_result.output
+
+    create_result = runner.invoke(
+        cli, ["--config", str(config_path), "review", "create", "--subject", "demo"]
+    )
+    assert create_result.exit_code == 0
+    assert "[review] Creating review with subject: demo" in create_result.output
+
+    comment_result = runner.invoke(cli, ["--config", str(config_path), "review", "comment"])
+    assert comment_result.exit_code == 0
+    assert "[review] Adding comment" in comment_result.output
+
+    approve_result = runner.invoke(cli, ["--config", str(config_path), "review", "approve"])
+    assert approve_result.exit_code == 0
+    assert "[review] Approving change" in approve_result.output
+
+
 def test_workflow_run_executes_steps(tmp_path, restore_commands):
     @click.command("remember")
     @click.pass_context
@@ -366,6 +455,26 @@ def test_workflow_run_continues_when_requested(tmp_path, restore_commands):
     assert result.exit_code != 0
     assert "after" in result.output
     assert "completed with 1 failed step(s)" in result.output
+
+
+def test_workflow_command_announces_execution(tmp_path, restore_commands):
+    @click.command("noop")
+    def noop():
+        click.echo("noop")
+
+    cli.add_command(noop)
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump({"workflows": {"demo": [["noop"], ["noop"]]}}),
+        encoding="utf-8",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["--config", str(config_path), "workflow", "run", "demo"])
+
+    assert result.exit_code == 0
+    assert "[workflow] Running 'demo' with 2 step(s)" in result.output
 
 
 def test_workflow_steps_share_runner(monkeypatch, tmp_path, restore_commands):
