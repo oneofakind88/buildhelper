@@ -9,13 +9,14 @@ from backends import (
     get_backend,
     register_backend,
 )
+from backends import registry as backend_registry
 
 
 @pytest.fixture(autouse=True)
 def reset_registry(monkeypatch):
-    monkeypatch.setattr(
-        "backends.BACKEND_REGISTRY", {"scm": {}, "analysis": {}, "review": {}}
-    )
+    registry = {"scm": {}, "analysis": {}, "review": {}}
+    monkeypatch.setattr(backend_registry, "BACKEND_REGISTRY", registry)
+    monkeypatch.setattr("backends.BACKEND_REGISTRY", registry)
 
 
 class DummySCM(SCMBackend):

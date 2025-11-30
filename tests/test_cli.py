@@ -4,13 +4,16 @@ import pytest
 import yaml
 
 from backends import AnalysisBackend, ReviewBackend, SCMBackend, register_backend
+from backends import registry as backend_registry
 from cli import cli, load_config
 from runners import LocalRunner
 
 
 @pytest.fixture(autouse=True)
 def reset_registry(monkeypatch):
-    monkeypatch.setattr("backends.BACKEND_REGISTRY", {"scm": {}, "analysis": {}, "review": {}})
+    registry = {"scm": {}, "analysis": {}, "review": {}}
+    monkeypatch.setattr(backend_registry, "BACKEND_REGISTRY", registry)
+    monkeypatch.setattr("backends.BACKEND_REGISTRY", registry)
 
 
 @pytest.fixture
@@ -53,18 +56,16 @@ def test_load_config_rejects_invalid_sections(tmp_path):
         load_config(str(config_path))
 
 
-def test_cli_initializes_context(tmp_path):
+def test_cli_initializes_context(tmp_path, monkeypatch):
     config_data = {"feature": True}
+    monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump(config_data), encoding="utf-8")
 
-    with cli.make_context(
-        "cli",
-        ["--env", "staging", "--config", str(config_path), "--verbose"],
-    ) as ctx:
+    with cli.make_context("cli", ["--verbose"]) as ctx:
         cli.invoke(ctx)
         assert ctx.obj["config"] == config_data
-        assert ctx.obj["env"] == "staging"
+        assert ctx.obj["env"] == "local"
         assert ctx.obj["sessions"] == {}
         assert isinstance(ctx.obj["runner"], LocalRunner)
         assert ctx.obj["workflow_state"] == {}
@@ -72,37 +73,35 @@ def test_cli_initializes_context(tmp_path):
         assert ctx.obj["quiet"] is False
 
 
-def test_cli_group_invocation(tmp_path):
+def test_cli_group_invocation(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump({}), encoding="utf-8")
 
     runner = CliRunner()
-    result = runner.invoke(cli, ["--config", str(config_path)])
+    result = runner.invoke(cli, [])
 
     assert result.exit_code == 0
 
 
-def test_cli_respects_quiet_flag(tmp_path):
+def test_cli_respects_quiet_flag(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump({}), encoding="utf-8")
 
-    with cli.make_context(
-        "cli",
-        ["--env", "dev", "--config", str(config_path), "--quiet"],
-    ) as ctx:
+    with cli.make_context("cli", ["--quiet"]) as ctx:
         cli.invoke(ctx)
         assert ctx.obj["verbose"] is False
         assert ctx.obj["quiet"] is True
 
 
-def test_cli_rejects_verbose_and_quiet_together(tmp_path):
+def test_cli_rejects_verbose_and_quiet_together(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump({}), encoding="utf-8")
 
     runner = CliRunner()
-    result = runner.invoke(
-        cli, ["--config", str(config_path), "--verbose", "--quiet", "scm", "status"]
-    )
+    result = runner.invoke(cli, ["--verbose", "--quiet", "scm", "status"])
 
     assert result.exit_code != 0
     assert "mutually exclusive" in result.output
@@ -110,6 +109,7 @@ def test_cli_rejects_verbose_and_quiet_together(tmp_path):
 
 def test_cli_selects_runner_for_environment(monkeypatch, tmp_path):
     config_data = {"envs": {"staging": {"runner": {"type": "local", "custom": True}}}}
+    monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump(config_data), encoding="utf-8")
 
@@ -123,13 +123,13 @@ def test_cli_selects_runner_for_environment(monkeypatch, tmp_path):
     monkeypatch.setattr("cli.get_runner", fake_get_runner)
 
     runner = CliRunner()
-    result = runner.invoke(cli, ["--env", "staging", "--config", str(config_path)])
+    result = runner.invoke(cli, [])
 
     assert result.exit_code == 0
-    assert created_runners == [("staging", config_data, created_runners[0][2])]
+    assert created_runners == [("local", config_data, created_runners[0][2])]
 
 
-def test_ensure_session_connects_and_stores_backend(tmp_path):
+def test_ensure_session_connects_and_stores_backend(tmp_path, monkeypatch):
     class DummySCM(SCMBackend):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
@@ -149,17 +149,18 @@ def test_ensure_session_connects_and_stores_backend(tmp_path):
 
     register_backend("scm", "dummy", DummySCM)
     config = {"backends": {"scm": "dummy"}, "backend_configs": {"dummy": {}}}
+    monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
 
     runner = CliRunner()
-    result = runner.invoke(cli, ["--config", str(config_path), "scm", "status"])
+    result = runner.invoke(cli, ["scm", "status"])
 
     assert result.exit_code == 0
     assert "{'connected': True}" in result.output
 
 
-def test_ensure_session_raises_when_backend_missing(tmp_path):
+def test_ensure_session_raises_when_backend_missing(tmp_path, monkeypatch):
     class DummyAnalysis(AnalysisBackend):
         def scan(self):
             return {"ran": True}
@@ -168,17 +169,18 @@ def test_ensure_session_raises_when_backend_missing(tmp_path):
             return {"format": format}
 
     register_backend("analysis", "dummy", DummyAnalysis)
+    monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump({"backends": {}}), encoding="utf-8")
 
     runner = CliRunner()
-    result = runner.invoke(cli, ["--config", str(config_path), "analysis", "scan"])
+    result = runner.invoke(cli, ["analysis", "scan"])
 
     assert result.exit_code != 0
     assert "No backend configured for domain" in result.output
 
 
-def test_session_cache_restores_and_persists(tmp_path):
+def test_session_cache_restores_and_persists(tmp_path, monkeypatch):
     cache_path = tmp_path / "cache.yaml"
 
     class DummySCM(SCMBackend):
@@ -214,11 +216,12 @@ def test_session_cache_restores_and_persists(tmp_path):
         "backends": {"scm": "cached"},
         "cache": {"sessions_path": str(cache_path)},
     }
+    monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
 
     runner = CliRunner()
-    result = runner.invoke(cli, ["--config", str(config_path), "scm", "status"])
+    result = runner.invoke(cli, ["scm", "status"])
 
     assert result.exit_code == 0
     assert DummySCM.last_instance.restored_payload == {"token": "cached"}
@@ -226,23 +229,25 @@ def test_session_cache_restores_and_persists(tmp_path):
     assert persisted["scm"] == {"token": "new-token"}
 
 
-def test_ensure_session_reports_missing_backends_section(tmp_path):
+def test_ensure_session_reports_missing_backends_section(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump({}), encoding="utf-8")
 
     runner = CliRunner()
-    result = runner.invoke(cli, ["--config", str(config_path), "scm", "status"])
+    result = runner.invoke(cli, ["scm", "status"])
 
     assert result.exit_code != 0
     assert "missing required 'backends' section" in result.output
 
 
-def test_ensure_session_rejects_non_mapping_backends(tmp_path):
+def test_ensure_session_rejects_non_mapping_backends(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump({"backends": []}), encoding="utf-8")
 
     runner = CliRunner()
-    result = runner.invoke(cli, ["--config", str(config_path), "scm", "status"])
+    result = runner.invoke(cli, ["scm", "status"])
 
     assert result.exit_code != 0
     assert "must be a mapping" in result.output
@@ -268,23 +273,24 @@ def test_ensure_session_calls_backend_connect_and_command(monkeypatch, tmp_path)
         backend_instances.append((domain, name, config, env, backend))
         return backend
 
-    monkeypatch.setattr("cli.get_backend", fake_get_backend)
+    monkeypatch.setattr("command_groups.common.get_backend", fake_get_backend)
 
     config = {"backends": {"scm": "stub"}, "backend_configs": {"stub": {}}}
+    monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
 
     runner = CliRunner()
-    result = runner.invoke(cli, ["--env", "dev", "--config", str(config_path), "scm", "status"])
+    result = runner.invoke(cli, ["scm", "status"])
 
     assert result.exit_code == 0
     assert "stub-status" in result.output
-    assert backend_instances[0][0:4] == ("scm", "stub", config, "dev")
+    assert backend_instances[0][0:4] == ("scm", "stub", config, "local")
     assert backend_instances[0][4].connect_calls == 1
     assert backend_instances[0][4].status_calls == 1
 
 
-def test_telemetry_records_command_duration(tmp_path):
+def test_telemetry_records_command_duration(tmp_path, monkeypatch):
     class DummySCM(SCMBackend):
         def connect(self):
             return None
@@ -300,16 +306,17 @@ def test_telemetry_records_command_duration(tmp_path):
 
     register_backend("scm", "dummy", DummySCM)
     config = {"backends": {"scm": "dummy"}}
+    monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
 
-    with cli.make_context("cli", ["--config", str(config_path), "scm", "sync"]) as ctx:
+    with cli.make_context("cli", ["scm", "sync"]) as ctx:
         cli.invoke(ctx)
         events = ctx.obj.telemetry.events
         assert any(event.name == "scm.sync" for event in events)
 
 
-def test_ensure_session_wraps_connection_errors(tmp_path):
+def test_ensure_session_wraps_connection_errors(tmp_path, monkeypatch):
     class FailingSCM(SCMBackend):
         def connect(self):
             raise RuntimeError("unreachable host")
@@ -324,6 +331,7 @@ def test_ensure_session_wraps_connection_errors(tmp_path):
             return message
 
     register_backend("scm", "failing", FailingSCM)
+    monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         yaml.safe_dump({"backends": {"scm": "failing"}, "backend_configs": {"failing": {}}}),
@@ -331,13 +339,13 @@ def test_ensure_session_wraps_connection_errors(tmp_path):
     )
 
     runner = CliRunner()
-    result = runner.invoke(cli, ["--config", str(config_path), "scm", "status"])
+    result = runner.invoke(cli, ["scm", "status"])
 
     assert result.exit_code != 0
     assert "Failed to connect to backend 'failing'" in result.output
 
 
-def test_command_outputs_include_backend_results(tmp_path):
+def test_command_outputs_include_backend_results(tmp_path, monkeypatch):
     class DummySCM(SCMBackend):
         def sync(self):
             return "synced"
@@ -373,31 +381,26 @@ def test_command_outputs_include_backend_results(tmp_path):
         "backends": {"scm": "dummy", "analysis": "dummy", "review": "dummy"},
         "backend_configs": {"dummy": {}},
     }
+    monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
 
     runner = CliRunner()
 
-    submit_result = runner.invoke(
-        cli, ["--config", str(config_path), "scm", "submit", "--message", "ready"]
-    )
+    submit_result = runner.invoke(cli, ["scm", "submit", "--message", "ready"])
     assert submit_result.exit_code == 0
     assert "submitted:ready" in submit_result.output
 
-    report_result = runner.invoke(
-        cli, ["--config", str(config_path), "analysis", "report", "--format", "json"]
-    )
+    report_result = runner.invoke(cli, ["analysis", "report", "--format", "json"])
     assert report_result.exit_code == 0
     assert "report:json" in report_result.output
 
-    approve_result = runner.invoke(
-        cli, ["--config", str(config_path), "review", "approve", "--message", "ship"]
-    )
+    approve_result = runner.invoke(cli, ["review", "approve", "--message", "ship"])
     assert approve_result.exit_code == 0
     assert "approved:ship" in approve_result.output
 
 
-def test_commands_print_invocation_messages_even_without_backend_output(tmp_path):
+def test_commands_print_invocation_messages_even_without_backend_output(tmp_path, monkeypatch):
     class SilentSCM(SCMBackend):
         def sync(self):
             return None
@@ -411,27 +414,26 @@ def test_commands_print_invocation_messages_even_without_backend_output(tmp_path
     register_backend("scm", "silent", SilentSCM)
 
     config = {"backends": {"scm": "silent"}, "backend_configs": {"silent": {}}}
+    monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
 
     runner = CliRunner()
 
-    sync_result = runner.invoke(cli, ["--config", str(config_path), "scm", "sync"])
+    sync_result = runner.invoke(cli, ["scm", "sync"])
     assert sync_result.exit_code == 0
     assert "[scm] Executing sync" in sync_result.output
 
-    status_result = runner.invoke(cli, ["--config", str(config_path), "scm", "status"])
+    status_result = runner.invoke(cli, ["scm", "status"])
     assert status_result.exit_code == 0
     assert "[scm] Checking status" in status_result.output
 
-    submit_result = runner.invoke(
-        cli, ["--config", str(config_path), "scm", "submit", "--message", "msg"]
-    )
+    submit_result = runner.invoke(cli, ["scm", "submit", "--message", "msg"])
     assert submit_result.exit_code == 0
     assert "[scm] Submitting with message: msg" in submit_result.output
 
 
-def test_analysis_and_review_commands_emit_invocation_messages(tmp_path):
+def test_analysis_and_review_commands_emit_invocation_messages(tmp_path, monkeypatch):
     class SilentAnalysis(AnalysisBackend):
         def scan(self):
             return None
@@ -456,37 +458,34 @@ def test_analysis_and_review_commands_emit_invocation_messages(tmp_path):
         "backends": {"analysis": "silent-analysis", "review": "silent-review"},
         "backend_configs": {"silent-analysis": {}, "silent-review": {}},
     }
+    monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
 
     runner = CliRunner()
 
-    scan_result = runner.invoke(cli, ["--config", str(config_path), "analysis", "scan"])
+    scan_result = runner.invoke(cli, ["analysis", "scan"])
     assert scan_result.exit_code == 0
     assert "[analysis] Running scan" in scan_result.output
 
-    report_result = runner.invoke(
-        cli, ["--config", str(config_path), "analysis", "report", "--format", "json"]
-    )
+    report_result = runner.invoke(cli, ["analysis", "report", "--format", "json"])
     assert report_result.exit_code == 0
     assert "[analysis] Generating report in json format" in report_result.output
 
-    create_result = runner.invoke(
-        cli, ["--config", str(config_path), "review", "create", "--subject", "demo"]
-    )
+    create_result = runner.invoke(cli, ["review", "create", "--subject", "demo"])
     assert create_result.exit_code == 0
     assert "[review] Creating review with subject: demo" in create_result.output
 
-    comment_result = runner.invoke(cli, ["--config", str(config_path), "review", "comment"])
+    comment_result = runner.invoke(cli, ["review", "comment"])
     assert comment_result.exit_code == 0
     assert "[review] Adding comment" in comment_result.output
 
-    approve_result = runner.invoke(cli, ["--config", str(config_path), "review", "approve"])
+    approve_result = runner.invoke(cli, ["review", "approve"])
     assert approve_result.exit_code == 0
     assert "[review] Approving change" in approve_result.output
 
 
-def test_workflow_run_executes_steps(tmp_path, restore_commands):
+def test_workflow_run_executes_steps(tmp_path, restore_commands, monkeypatch):
     @click.command("remember")
     @click.pass_context
     def remember(ctx):
@@ -500,6 +499,7 @@ def test_workflow_run_executes_steps(tmp_path, restore_commands):
     cli.add_command(remember)
     cli.add_command(recall)
 
+    monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         yaml.safe_dump({"workflows": {"demo": [["remember"], ["recall"]]}}),
@@ -507,13 +507,13 @@ def test_workflow_run_executes_steps(tmp_path, restore_commands):
     )
 
     runner = CliRunner()
-    result = runner.invoke(cli, ["--config", str(config_path), "workflow", "run", "demo"])
+    result = runner.invoke(cli, ["workflow", "run", "demo"])
 
     assert result.exit_code == 0
     assert "hello" in result.output
 
 
-def test_workflow_run_stops_on_error(tmp_path, restore_commands):
+def test_workflow_run_stops_on_error(tmp_path, restore_commands, monkeypatch):
     @click.command("fail")
     def fail():
         raise click.ClickException("boom")
@@ -525,6 +525,7 @@ def test_workflow_run_stops_on_error(tmp_path, restore_commands):
     cli.add_command(fail)
     cli.add_command(after)
 
+    monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         yaml.safe_dump({"workflows": {"demo": [["fail"], ["after"]]}}),
@@ -532,14 +533,14 @@ def test_workflow_run_stops_on_error(tmp_path, restore_commands):
     )
 
     runner = CliRunner()
-    result = runner.invoke(cli, ["--config", str(config_path), "workflow", "run", "demo"])
+    result = runner.invoke(cli, ["workflow", "run", "demo"])
 
     assert result.exit_code != 0
     assert "after" not in result.output
     assert "Step 'fail' failed" in result.output
 
 
-def test_workflow_run_continues_when_requested(tmp_path, restore_commands):
+def test_workflow_run_continues_when_requested(tmp_path, restore_commands, monkeypatch):
     @click.command("fail")
     def fail():
         raise click.ClickException("boom")
@@ -551,6 +552,7 @@ def test_workflow_run_continues_when_requested(tmp_path, restore_commands):
     cli.add_command(fail)
     cli.add_command(after)
 
+    monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         yaml.safe_dump({"workflows": {"demo": [["fail"], ["after"]]}}),
@@ -558,23 +560,21 @@ def test_workflow_run_continues_when_requested(tmp_path, restore_commands):
     )
 
     runner = CliRunner()
-    result = runner.invoke(
-        cli,
-        ["--config", str(config_path), "workflow", "run", "demo", "--continue-on-error"],
-    )
+    result = runner.invoke(cli, ["workflow", "run", "demo", "--continue-on-error"])
 
     assert result.exit_code != 0
     assert "after" in result.output
     assert "completed with 1 failed step(s)" in result.output
 
 
-def test_workflow_command_announces_execution(tmp_path, restore_commands):
+def test_workflow_command_announces_execution(tmp_path, restore_commands, monkeypatch):
     @click.command("noop")
     def noop():
         click.echo("noop")
 
     cli.add_command(noop)
 
+    monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         yaml.safe_dump({"workflows": {"demo": [["noop"], ["noop"]]}}),
@@ -582,7 +582,7 @@ def test_workflow_command_announces_execution(tmp_path, restore_commands):
     )
 
     runner = CliRunner()
-    result = runner.invoke(cli, ["--config", str(config_path), "workflow", "run", "demo"])
+    result = runner.invoke(cli, ["workflow", "run", "demo"])
 
     assert result.exit_code == 0
     assert "[workflow] Running 'demo' with 2 step(s)" in result.output
@@ -611,6 +611,7 @@ def test_workflow_steps_share_runner(monkeypatch, tmp_path, restore_commands):
 
     cli.add_command(run_shell)
 
+    monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         yaml.safe_dump({"workflows": {"demo": [["run-shell"], ["run-shell"]]}}),
@@ -618,7 +619,7 @@ def test_workflow_steps_share_runner(monkeypatch, tmp_path, restore_commands):
     )
 
     runner = CliRunner()
-    result = runner.invoke(cli, ["--config", str(config_path), "workflow", "run", "demo"])
+    result = runner.invoke(cli, ["workflow", "run", "demo"])
 
     assert result.exit_code == 0
     assert stub_runner.calls == [["echo", "hello"], ["echo", "hello"]]

@@ -1,74 +1,11 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from copy import deepcopy
 from typing import Any, Dict, Mapping, MutableMapping, Type
 
 import click
 
-
-class BaseBackend(ABC):
-    """Base class for all backend implementations."""
-
-    def __init__(self, name: str, config: Mapping[str, Any] | None = None, env: str | None = None) -> None:
-        self.name = name
-        self.config: Dict[str, Any] = dict(config or {})
-        self.env = env
-
-    def connect(self) -> None:
-        """Establish a connection to the backend.
-
-        Subclasses may override this method to perform setup such as
-        authentication or network handshakes. The default implementation is a
-        no-op to keep simple backends lightweight.
-        """
-
-        return None
-
-
-class SCMBackend(BaseBackend):
-    """Interface for source control management backends."""
-
-    @abstractmethod
-    def sync(self) -> Any:  # pragma: no cover - interface only
-        """Synchronize the working tree."""
-
-    @abstractmethod
-    def status(self) -> Any:  # pragma: no cover - interface only
-        """Return status information for the working tree."""
-
-    @abstractmethod
-    def submit(self, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover - interface only
-        """Submit changes to the remote repository or review system."""
-
-
-class AnalysisBackend(BaseBackend):
-    """Interface for analysis backends."""
-
-    @abstractmethod
-    def scan(self) -> Any:  # pragma: no cover - interface only
-        """Run an analysis scan."""
-
-    @abstractmethod
-    def report(self, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover - interface only
-        """Generate and return an analysis report."""
-
-
-class ReviewBackend(BaseBackend):
-    """Interface for review backends."""
-
-    @abstractmethod
-    def create_review(self, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover - interface only
-        """Create a review or review request."""
-
-    @abstractmethod
-    def comment(self, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover - interface only
-        """Create a comment on a review or change."""
-
-    @abstractmethod
-    def approve(self, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover - interface only
-        """Approve a review or change."""
-
+from .base import BaseBackend
 
 BackendType = Type[BaseBackend]
 BackendRegistry = MutableMapping[str, MutableMapping[str, BackendType]]
