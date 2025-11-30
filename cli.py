@@ -7,6 +7,7 @@ import click
 import yaml
 
 from backends import get_backend
+from runners import get_runner
 
 
 DEFAULT_ENV = "local"
@@ -28,12 +29,6 @@ def load_config(config_path: str) -> Dict[str, Any]:
         raise click.ClickException("Config file must contain a YAML mapping")
 
     return data
-
-
-def derive_runner(env: str) -> str:
-    return f"runner_{env}"
-
-
 def ensure_session(domain: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Ensure a connected backend session exists for ``domain``.
 
@@ -91,11 +86,12 @@ def cli(ctx: click.Context, env: str, config: str, verbose: bool) -> None:
         return
 
     configuration = load_config(config)
+    runner = get_runner(env, configuration)
     ctx.obj = {
         "config": configuration,
         "env": env,
         "sessions": {},
-        "runner": derive_runner(env),
+        "runner": runner,
         "workflow_state": {},
         "verbose": verbose,
     }
