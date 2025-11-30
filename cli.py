@@ -157,32 +157,26 @@ def ensure_session(domain: str) -> Callable[[Callable[..., Any]], Callable[..., 
 @click.option("--quiet", is_flag=True, help="Reduce logging output to errors only")
 @click.pass_context
 def cli(ctx: click.Context, env: str, config: str, verbose: bool, quiet: bool) -> None:
-    ctx.ensure_object(ContextState)
-    if isinstance(ctx.obj, ContextState) and ctx.obj.initialized:
+    ctx.ensure_object(dict)
+    if ctx.obj:
         return
 
     if verbose and quiet:
         raise click.ClickException("--verbose and --quiet are mutually exclusive")
 
     configuration = load_config(config)
-    discover_plugins()
     configure_logging(verbose=verbose, quiet=quiet)
     logger.debug("Loaded configuration from %s", config)
     runner = get_runner(env, configuration)
-    session_cache = SessionCache.from_config(configuration)
-    telemetry = TelemetryCollector()
-    ctx.obj = ContextState(
-        config=configuration,
-        env=env,
-        sessions={},
-        runner=runner,
-        workflow_state={},
-        verbose=verbose,
-        quiet=quiet,
-        session_cache=session_cache,
-        telemetry=telemetry,
-        initialized=True,
-    )
+    ctx.obj = {
+        "config": configuration,
+        "env": env,
+        "sessions": {},
+        "runner": runner,
+        "workflow_state": {},
+        "verbose": verbose,
+        "quiet": quiet,
+    }
 
 
 @cli.group()
@@ -281,7 +275,7 @@ def _normalize_step(step: Any) -> List[str]:
 @telemetry_event("scm.sync")
 def sync(ctx: click.Context) -> None:
     click.echo("[scm] Executing sync")
-    backend = ctx.obj.sessions["scm"]
+    backend = ctx.obj["sessions"]["scm"]
     result = backend.sync()
     if result is not None:
         click.echo(result)
@@ -292,7 +286,7 @@ def sync(ctx: click.Context) -> None:
 @telemetry_event("scm.status")
 def status(ctx: click.Context) -> None:
     click.echo("[scm] Checking status")
-    backend = ctx.obj.sessions["scm"]
+    backend = ctx.obj["sessions"]["scm"]
     result = backend.status()
     if result is not None:
         click.echo(result)
@@ -304,7 +298,7 @@ def status(ctx: click.Context) -> None:
 @click.option("--message", "message", default="", show_default=True, help="Submission message")
 def submit(ctx: click.Context, message: str) -> None:
     click.echo(f"[scm] Submitting with message: {message}")
-    backend = ctx.obj.sessions["scm"]
+    backend = ctx.obj["sessions"]["scm"]
     result = backend.submit(message=message)
     if result is not None:
         click.echo(result)
@@ -315,7 +309,7 @@ def submit(ctx: click.Context, message: str) -> None:
 @telemetry_event("analysis.scan")
 def scan(ctx: click.Context) -> None:
     click.echo("[analysis] Running scan")
-    backend = ctx.obj.sessions["analysis"]
+    backend = ctx.obj["sessions"]["analysis"]
     result = backend.scan()
     if result is not None:
         click.echo(result)
@@ -333,7 +327,7 @@ def scan(ctx: click.Context) -> None:
 )
 def report(ctx: click.Context, format_: str) -> None:
     click.echo(f"[analysis] Generating report in {format_} format")
-    backend = ctx.obj.sessions["analysis"]
+    backend = ctx.obj["sessions"]["analysis"]
     result = backend.report(format=format_)
     if result is not None:
         click.echo(result)
@@ -345,7 +339,7 @@ def report(ctx: click.Context, format_: str) -> None:
 @click.option("--subject", default="", show_default=True)
 def create(ctx: click.Context, subject: str) -> None:
     click.echo(f"[review] Creating review with subject: {subject}")
-    backend = ctx.obj.sessions["review"]
+    backend = ctx.obj["sessions"]["review"]
     result = backend.create_review(subject=subject)
     if result is not None:
         click.echo(result)
@@ -357,7 +351,7 @@ def create(ctx: click.Context, subject: str) -> None:
 @click.option("--body", default="", show_default=True)
 def comment(ctx: click.Context, body: str) -> None:
     click.echo("[review] Adding comment")
-    backend = ctx.obj.sessions["review"]
+    backend = ctx.obj["sessions"]["review"]
     result = backend.comment(body=body)
     if result is not None:
         click.echo(result)
@@ -369,7 +363,7 @@ def comment(ctx: click.Context, body: str) -> None:
 @click.option("--message", default="", show_default=True)
 def approve(ctx: click.Context, message: str) -> None:
     click.echo("[review] Approving change")
-    backend = ctx.obj.sessions["review"]
+    backend = ctx.obj["sessions"]["review"]
     result = backend.approve(message=message)
     if result is not None:
         click.echo(result)

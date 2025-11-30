@@ -45,6 +45,9 @@ Commands are defined in `cli.py` as Click subcommands. Each command emits a huma
 - `telemetry.py` records command durations and statuses through a decorator (`@telemetry_event`) and a context manager (`TelemetryCollector.track`).
 - Workflow steps automatically emit telemetry, and individual commands record success or failure timing.
 
+### Logging
+- `logging_utils.py` centralizes logging configuration. The `--verbose/--quiet` flags map to DEBUG/ERROR levels respectively, ensuring consistent log output across commands.
+
 ## Configuration format
 
 Example `config.yaml`:

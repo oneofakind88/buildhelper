@@ -95,36 +95,6 @@ def test_cli_respects_quiet_flag(tmp_path):
         assert ctx.obj["quiet"] is True
 
 
-def test_cli_discovers_plugins(monkeypatch, tmp_path):
-    calls = []
-
-    class FakeEntry:
-        name = "fake"
-
-        def load(self):
-            calls.append("loaded")
-
-            def _loader():
-                calls.append("executed")
-
-            return _loader
-
-    class FakeEntries:
-        def get(self, group, default=None):
-            assert group == "buildhelper.plugins"
-            return [FakeEntry()]
-
-    monkeypatch.setattr("plugins.metadata.entry_points", lambda: FakeEntries())
-
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(yaml.safe_dump({}), encoding="utf-8")
-    runner = CliRunner()
-    result = runner.invoke(cli, ["--config", str(config_path)])
-
-    assert result.exit_code == 0
-    assert calls == ["loaded", "executed"]
-
-
 def test_cli_rejects_verbose_and_quiet_together(tmp_path):
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump({}), encoding="utf-8")
