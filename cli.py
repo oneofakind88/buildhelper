@@ -3,6 +3,8 @@ import pathlib
 import shlex
 from typing import Any, Callable, Dict, Iterable, List
 
+from logging_utils import configure_logging, get_logger
+
 import click
 import yaml
 
@@ -29,6 +31,11 @@ def load_config(config_path: str) -> Dict[str, Any]:
         raise click.ClickException("Config file must contain a YAML mapping")
 
     return data
+
+
+logger = get_logger(__name__)
+
+
 def ensure_session(domain: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Ensure a connected backend session exists for ``domain``.
 
@@ -46,8 +53,21 @@ def ensure_session(domain: str) -> Callable[[Callable[..., Any]], Callable[..., 
             sessions = ctx.obj.setdefault("sessions", {})
 
             if domain not in sessions:
+                config = ctx.obj.get("config", {})
+                backends_config = config.get("backends")
+
+                if backends_config is None:
+                    raise click.ClickException(
+                        "Config is missing required 'backends' section"
+                    )
+
+                if not isinstance(backends_config, dict):
+                    raise click.ClickException(
+                        "Config 'backends' section must be a mapping"
+                    )
+
                 try:
-                    backend_name = ctx.obj.get("config", {})["backends"][domain]
+                    backend_name = backends_config[domain]
                 except KeyError as exc:
                     raise click.ClickException(
                         f"No backend configured for domain '{domain}'"
@@ -56,11 +76,21 @@ def ensure_session(domain: str) -> Callable[[Callable[..., Any]], Callable[..., 
                 backend = get_backend(
                     domain,
                     backend_name,
-                    config=ctx.obj.get("config", {}),
+                    config=config,
                     env=ctx.obj.get("env"),
                 )
-                backend.connect()
+                try:
+                    backend.connect()
+                except click.ClickException:
+                    raise
+                except Exception as exc:
+                    raise click.ClickException(
+                        f"Failed to connect to backend '{backend_name}' for domain '{domain}': {exc}"
+                    ) from exc
                 sessions[domain] = backend
+                logger.debug(
+                    "Connected backend '%s' for domain '%s'", backend_name, domain
+                )
 
             return command(ctx, *args, **kwargs)
 
@@ -78,7 +108,7 @@ def ensure_session(domain: str) -> Callable[[Callable[..., Any]], Callable[..., 
     type=click.Path(exists=False, dir_okay=False, resolve_path=True, path_type=str),
     help="Path to configuration file",
 )
-@click.option("--verbose/--quiet", default=False, help="Enable verbose output")
+@click.option("--verbose/--quiet", default=False, help="Enable verbose logging output")
 @click.pass_context
 def cli(ctx: click.Context, env: str, config: str, verbose: bool) -> None:
     ctx.ensure_object(dict)
@@ -86,6 +116,8 @@ def cli(ctx: click.Context, env: str, config: str, verbose: bool) -> None:
         return
 
     configuration = load_config(config)
+    configure_logging(verbose=verbose, quiet=not verbose)
+    logger.debug("Loaded configuration from %s", config)
     runner = get_runner(env, configuration)
     ctx.obj = {
         "config": configuration,

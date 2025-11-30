@@ -119,6 +119,56 @@ def test_ensure_session_raises_when_backend_missing(tmp_path):
     assert "No backend configured for domain" in result.output
 
 
+def test_ensure_session_reports_missing_backends_section(tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump({}), encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["--config", str(config_path), "scm", "status"])
+
+    assert result.exit_code != 0
+    assert "missing required 'backends' section" in result.output
+
+
+def test_ensure_session_rejects_non_mapping_backends(tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump({"backends": []}), encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["--config", str(config_path), "scm", "status"])
+
+    assert result.exit_code != 0
+    assert "must be a mapping" in result.output
+
+
+def test_ensure_session_wraps_connection_errors(tmp_path):
+    class FailingSCM(SCMBackend):
+        def connect(self):
+            raise RuntimeError("unreachable host")
+
+        def sync(self):
+            return "nope"
+
+        def status(self):
+            return "nope"
+
+        def submit(self, message: str = ""):
+            return message
+
+    register_backend("scm", "failing", FailingSCM)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump({"backends": {"scm": "failing"}, "backend_configs": {"failing": {}}}),
+        encoding="utf-8",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["--config", str(config_path), "scm", "status"])
+
+    assert result.exit_code != 0
+    assert "Failed to connect to backend 'failing'" in result.output
+
+
 def test_command_outputs_include_backend_results(tmp_path):
     class DummySCM(SCMBackend):
         def sync(self):
