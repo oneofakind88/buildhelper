@@ -175,6 +175,7 @@ def workflow_run(ctx: click.Context, name: str, continue_on_error: bool) -> None
     if not isinstance(raw_steps, list):
         raise click.ClickException("Workflow steps must be defined as a list")
 
+    click.echo(f"[workflow] Running '{name}' with {len(raw_steps)} step(s)")
     failures = 0
     for raw_step in raw_steps:
         step_args = _normalize_step(raw_step)
@@ -220,6 +221,7 @@ def _normalize_step(step: Any) -> List[str]:
 @scm.command()
 @ensure_session("scm")
 def sync(ctx: click.Context) -> None:
+    click.echo("[scm] Executing sync")
     backend = ctx.obj["sessions"]["scm"]
     result = backend.sync()
     if result is not None:
@@ -229,6 +231,7 @@ def sync(ctx: click.Context) -> None:
 @scm.command()
 @ensure_session("scm")
 def status(ctx: click.Context) -> None:
+    click.echo("[scm] Checking status")
     backend = ctx.obj["sessions"]["scm"]
     result = backend.status()
     if result is not None:
@@ -239,6 +242,7 @@ def status(ctx: click.Context) -> None:
 @ensure_session("scm")
 @click.option("--message", "message", default="", show_default=True, help="Submission message")
 def submit(ctx: click.Context, message: str) -> None:
+    click.echo(f"[scm] Submitting with message: {message}")
     backend = ctx.obj["sessions"]["scm"]
     result = backend.submit(message=message)
     if result is not None:
@@ -248,6 +252,7 @@ def submit(ctx: click.Context, message: str) -> None:
 @analysis.command()
 @ensure_session("analysis")
 def scan(ctx: click.Context) -> None:
+    click.echo("[analysis] Running scan")
     backend = ctx.obj["sessions"]["analysis"]
     result = backend.scan()
     if result is not None:
@@ -264,6 +269,7 @@ def scan(ctx: click.Context) -> None:
     help="Output format for the analysis report",
 )
 def report(ctx: click.Context, format_: str) -> None:
+    click.echo(f"[analysis] Generating report in {format_} format")
     backend = ctx.obj["sessions"]["analysis"]
     result = backend.report(format=format_)
     if result is not None:
@@ -274,6 +280,7 @@ def report(ctx: click.Context, format_: str) -> None:
 @ensure_session("review")
 @click.option("--subject", default="", show_default=True)
 def create(ctx: click.Context, subject: str) -> None:
+    click.echo(f"[review] Creating review with subject: {subject}")
     backend = ctx.obj["sessions"]["review"]
     result = backend.create_review(subject=subject)
     if result is not None:
@@ -284,6 +291,7 @@ def create(ctx: click.Context, subject: str) -> None:
 @ensure_session("review")
 @click.option("--body", default="", show_default=True)
 def comment(ctx: click.Context, body: str) -> None:
+    click.echo("[review] Adding comment")
     backend = ctx.obj["sessions"]["review"]
     result = backend.comment(body=body)
     if result is not None:
@@ -294,6 +302,7 @@ def comment(ctx: click.Context, body: str) -> None:
 @ensure_session("review")
 @click.option("--message", default="", show_default=True)
 def approve(ctx: click.Context, message: str) -> None:
+    click.echo("[review] Approving change")
     backend = ctx.obj["sessions"]["review"]
     result = backend.approve(message=message)
     if result is not None:
