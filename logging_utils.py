@@ -1,9 +1,9 @@
 """Lightweight logging helpers for the CLI commands.
 
-The module centralizes logging configuration so that the ``--verbose/--quiet``
-flag behaves consistently across commands. ``configure_logging`` is idempotent
-and safe to call multiple times because it only attaches handlers when none are
-configured yet.
+The module centralizes logging configuration so that the ``--verbose`` and
+``--quiet`` flags behave consistently across commands. ``configure_logging`` is
+idempotent and safe to call multiple times because it only attaches handlers
+when none are configured yet.
 """
 
 from __future__ import annotations
