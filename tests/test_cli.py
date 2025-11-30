@@ -12,6 +12,14 @@ def reset_registry(monkeypatch):
     monkeypatch.setattr("backends.BACKEND_REGISTRY", {"scm": {}, "analysis": {}, "review": {}})
 
 
+@pytest.fixture
+def restore_commands():
+    original_commands = dict(cli.commands)
+    yield
+    cli.commands.clear()
+    cli.commands.update(original_commands)
+
+
 def test_load_config_missing_returns_empty(tmp_path):
     missing_config = tmp_path / "missing.yaml"
     assert load_config(str(missing_config)) == {}
@@ -174,3 +182,85 @@ def test_command_outputs_include_backend_results(tmp_path):
     )
     assert approve_result.exit_code == 0
     assert "approved:ship" in approve_result.output
+
+
+def test_workflow_run_executes_steps(tmp_path, restore_commands):
+    @click.command("remember")
+    @click.pass_context
+    def remember(ctx):
+        ctx.obj["workflow_state"]["greeting"] = "hello"
+
+    @click.command("recall")
+    @click.pass_context
+    def recall(ctx):
+        click.echo(ctx.obj["workflow_state"].get("greeting"))
+
+    cli.add_command(remember)
+    cli.add_command(recall)
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump({"workflows": {"demo": [["remember"], ["recall"]]}}),
+        encoding="utf-8",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["--config", str(config_path), "workflow", "run", "demo"])
+
+    assert result.exit_code == 0
+    assert "hello" in result.output
+
+
+def test_workflow_run_stops_on_error(tmp_path, restore_commands):
+    @click.command("fail")
+    def fail():
+        raise click.ClickException("boom")
+
+    @click.command("after")
+    def after():
+        click.echo("after")
+
+    cli.add_command(fail)
+    cli.add_command(after)
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump({"workflows": {"demo": [["fail"], ["after"]]}}),
+        encoding="utf-8",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["--config", str(config_path), "workflow", "run", "demo"])
+
+    assert result.exit_code != 0
+    assert "after" not in result.output
+    assert "Step 'fail' failed" in result.output
+
+
+def test_workflow_run_continues_when_requested(tmp_path, restore_commands):
+    @click.command("fail")
+    def fail():
+        raise click.ClickException("boom")
+
+    @click.command("after")
+    def after():
+        click.echo("after")
+
+    cli.add_command(fail)
+    cli.add_command(after)
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump({"workflows": {"demo": [["fail"], ["after"]]}}),
+        encoding="utf-8",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["--config", str(config_path), "workflow", "run", "demo", "--continue-on-error"],
+    )
+
+    assert result.exit_code != 0
+    assert "after" in result.output
+    assert "completed with 1 failed step(s)" in result.output

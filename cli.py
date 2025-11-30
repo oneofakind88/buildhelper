@@ -1,6 +1,7 @@
 import functools
 import pathlib
-from typing import Any, Callable, Dict
+import shlex
+from typing import Any, Callable, Dict, Iterable, List
 
 import click
 import yaml
@@ -85,8 +86,11 @@ def ensure_session(domain: str) -> Callable[[Callable[..., Any]], Callable[..., 
 @click.option("--verbose/--quiet", default=False, help="Enable verbose output")
 @click.pass_context
 def cli(ctx: click.Context, env: str, config: str, verbose: bool) -> None:
-    configuration = load_config(config)
     ctx.ensure_object(dict)
+    if ctx.obj:
+        return
+
+    configuration = load_config(config)
     ctx.obj = {
         "config": configuration,
         "env": env,
@@ -119,6 +123,70 @@ def review(ctx: click.Context) -> None:
 @click.pass_context
 def workflow(ctx: click.Context) -> None:
     ctx.ensure_object(dict)
+
+
+@workflow.command("run")
+@click.argument("name")
+@click.option(
+    "--continue-on-error",
+    is_flag=True,
+    help="Continue executing remaining steps even if a step fails",
+)
+@click.pass_context
+def workflow_run(ctx: click.Context, name: str, continue_on_error: bool) -> None:
+    config = ctx.obj.get("config", {})
+    workflows = config.get("workflows", {})
+
+    if not isinstance(workflows, dict):
+        raise click.ClickException("Config 'workflows' section must be a mapping")
+
+    if name not in workflows:
+        raise click.ClickException(f"Workflow '{name}' is not defined in config")
+
+    raw_steps = workflows[name]
+    if not isinstance(raw_steps, list):
+        raise click.ClickException("Workflow steps must be defined as a list")
+
+    failures = 0
+    for raw_step in raw_steps:
+        step_args = _normalize_step(raw_step)
+        if not step_args:
+            continue
+
+        try:
+            with cli.make_context("cli", step_args, obj=ctx.obj) as step_ctx:
+                cli.invoke(step_ctx)
+        except click.ClickException as exc:
+            failures += 1
+            click.echo(
+                f"Step '{' '.join(step_args)}' failed: {exc.format_message()}",
+                err=True,
+            )
+            if not continue_on_error:
+                raise
+        except Exception as exc:  # pragma: no cover - safeguard for unexpected errors
+            failures += 1
+            click.echo(
+                f"Step '{' '.join(step_args)}' failed: {exc}",
+                err=True,
+            )
+            if not continue_on_error:
+                raise click.ClickException(str(exc)) from exc
+
+    if failures:
+        raise click.ClickException(
+            f"Workflow '{name}' completed with {failures} failed step(s)"
+        )
+
+
+def _normalize_step(step: Any) -> List[str]:
+    if isinstance(step, str):
+        return shlex.split(step)
+
+    if isinstance(step, Iterable):
+        return [str(part) for part in step]
+
+    raise click.ClickException("Workflow steps must be strings or iterables of arguments")
 
 
 @scm.command()
