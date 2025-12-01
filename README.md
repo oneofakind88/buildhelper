@@ -93,6 +93,18 @@ workflows:
 - `workflows` lists reusable sequences of commands.
 - Configuration is validated for expected mapping shapes during startup to catch typos early.
 
+### Built-in demo backends
+
+Buildhelper ships with lightweight demo backends so you can exercise the CLI without
+connecting to real services:
+
+- **SCM**: `p4`, `git`
+- **Analysis**: `sonarqube`, `klocwork`
+- **Review**: `bitbucket`, `perforce-swarm`
+
+Example configurations are available under `examples/` to showcase how to wire each
+backend with dummy credentials and optional environment-specific overrides.
+
 ## Usage
 
 Initialize the CLI with a configuration file and optional environment:

@@ -1,0 +1,23 @@
+# Demo configuration using Git SCM, Klocwork analysis, and Perforce Swarm review
+backends:
+  scm: git
+  analysis: klocwork
+  review: perforce-swarm
+backend_configs:
+  git:
+    repo: https://git.example.com/demo/tools.git
+    branch: main
+    author: buildhelper
+  klocwork:
+    host: https://klocwork.example.com
+    project: tools-suite
+  perforce-swarm:
+    host: https://swarm.example.com
+    user: reviewer
+    token: SWARM_TOKEN_PLACEHOLDER
+    project: tools
+workflows:
+  code-review:
+    - "scm status"
+    - "analysis scan"
+    - ["review", "create", "--subject", "Demo change request"]

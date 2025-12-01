@@ -1,0 +1,34 @@
+# Demo configuration using Perforce SCM, SonarQube analysis, and Bitbucket review
+backends:
+  scm: p4
+  analysis: sonarqube
+  review: bitbucket
+backend_configs:
+  p4:
+    server: perforce.example.com:1666
+    workspace: demo-workspace
+    user: buildhelper
+  sonarqube:
+    host: https://sonarqube.example.com
+    token: SONAR_TOKEN_PLACEHOLDER
+    project: web-frontend
+  bitbucket:
+    host: https://bitbucket.example.com
+    user: ci-bot
+    app_password: APP_PASSWORD_PLACEHOLDER
+    project_key: DEMO
+envs:
+  staging:
+    backend_configs:
+      p4:
+        workspace: staging-workspace
+      sonarqube:
+        host: https://staging-sonarqube.example.com
+      bitbucket:
+        project_key: STAGE
+workflows:
+  daily-check:
+    - "scm sync"
+    - "analysis scan"
+    - ["analysis", "report", "--format", "json"]
+    - ["review", "create", "--subject", "Daily automated review"]
